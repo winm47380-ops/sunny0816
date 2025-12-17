@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -11,17 +12,17 @@
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <!-- Babel for JSX -->
+    
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    height: {
+    <脚本>
+        尾风.配置 = {
+            主题：{
+                扩展：{
+                    高度：{
                         'screen-dvh': '100dvh', 
                     },
-                    minHeight: {
+                    最小高度：{
                         'screen-dvh': '100dvh',
                     },
                     maxHeight: {
@@ -439,7 +440,16 @@
                     });
                     if (!response.ok) { const err = await response.json(); throw new Error(err.error?.message || 'API Error'); }
                     const data = await response.json();
-                    return jsonMode ? JSON.parse(data.choices[0].message.content) : data.choices[0].message.content;
+                    
+                    let content = data.choices[0].message.content;
+                    
+                    if (jsonMode) {
+                        // Fix: Clean up markdown code blocks if present
+                        content = content.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+                        return JSON.parse(content);
+                    }
+                    
+                    return content;
                 } catch (e) { console.error("AI Error:", e); setError(e.message); return null; }
             };
 
