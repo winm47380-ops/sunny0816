@@ -172,7 +172,6 @@
         const { useState, useEffect, useRef } = React;
 
         // --- Default System Prompt ---
-        // UPDATED: Added instructions for stat caps, slow growth, and NPC death
         const DEFAULT_SYSTEM_PROMPT = `你是一款名为“万界养成模拟器”的高级AI游戏引擎。你的核心职责是为玩家提供一个沉浸式、高自由度且数值驱动的角色扮演体验。
 
 【核心原则】
@@ -202,6 +201,9 @@
             changes: { "心机": 1, "人脉": -1 },
             newNpcs: [],
             deadNpcs: [],
+            // MOCK: Add mock items
+            gained_items: [{name: "残破的玉佩", desc: "似乎是生母留下的遗物", count: 1}],
+            lost_items: [],
             choices: [
                 { text: "强忍泪水，行礼后默默退下", action: "retreat" },
                 { text: "大声呼喊父皇，试图引起注意", action: "yell" },
@@ -243,12 +245,14 @@
             Download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>,
             Upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>,
             Trophy: <><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></>,
-            Copy: <><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></>
+            Copy: <><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></>,
+            Check: <polyline points="20 6 9 17 4 12" />,
+            Backpack: <><path d="M19 20H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2Z"/><path d="M16 7V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v2"/><path d="M12 12v4"/><path d="M10 14h4"/></>
         };
 
         const SvgIcon = ({ name, className, size = 24, filled = false }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                {Icons[name]}
+                {Icons[name] || Icons['Sparkles']}
             </svg>
         );
 
@@ -316,7 +320,15 @@
             const [error, setError] = useState('');
             const [showLoadMenu, setShowLoadMenu] = useState(false);
             const [showExitConfirm, setShowExitConfirm] = useState(false);
-            const [saveMessage, setSaveMessage] = useState(''); 
+            
+            // --- NEW: Global Toast State ---
+            const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+            
+            // Toast Helper
+            const showToastMsg = (msg, type = 'success') => {
+                setToast({ show: true, message: msg, type });
+                setTimeout(() => setToast(prev => ({ ...prev, show: false })), 2500);
+            };
 
             // Export Modal State
             const [showExportModal, setShowExportModal] = useState(false);
@@ -340,6 +352,15 @@
             const [playerTalent, setPlayerTalent] = useState('');
             const [playerBackground, setPlayerBackground] = useState(''); 
             
+            // --- INVENTORY STATE ---
+            const [playerInventory, setPlayerInventory] = useState([]);
+            const [showInventory, setShowInventory] = useState(false);
+            
+            // --- ITEM EDITOR STATE ---
+            const [showItemEditor, setShowItemEditor] = useState(false);
+            const [editingItem, setEditingItem] = useState(null); // { id, name, desc, count, type }
+            const [itemGenLoading, setItemGenLoading] = useState(false);
+
             const [selectedGoal, setSelectedGoal] = useState('');
             const [customGoalInput, setCustomGoalInput] = useState('');
             
@@ -373,6 +394,7 @@
             // NPC Stat Editing states
             const [npcNewStatName, setNpcNewStatName] = useState('');
             const [npcNewStatValue, setNpcNewStatValue] = useState(10);
+            const [npcGenLoading, setNpcGenLoading] = useState(false);
 
             // World Expansion State
             const [newLocationName, setNewLocationName] = useState('');
@@ -410,6 +432,7 @@
                 localStorage.setItem('ai_sim_model', model);
                 localStorage.setItem('ai_sim_system_prompt', systemPrompt);
                 setShowSettings(false);
+                showToastMsg("设置已保存", "success");
             };
 
             const fetchModels = async () => {
@@ -423,8 +446,7 @@
                     if (data.data) {
                         const models = data.data.map(m => ({ id: m.id })).sort((a, b) => a.id.localeCompare(b.id));
                         setModelList(models);
-                        setSaveMessage("模型列表更新成功");
-                        setTimeout(() => setSaveMessage(''), 2000);
+                        showToastMsg("模型列表更新成功", "success");
                     }
                 } catch (e) { setError("获取模型列表失败: " + e.message); } finally { setFetchingModels(false); }
             };
@@ -492,7 +514,9 @@
                     personality: rel.personality || "未知", 
                     status: rel.status || "普通", 
                     location: rel.location || (worldData.locations?.[0] || "未知"),
-                    stats: existingStats 
+                    stats: existingStats,
+                    appearance: rel.appearance || "", // Default empty
+                    background: rel.background || ""  // Default empty
                 }); 
                 setShowNpcEditor(true); 
             };
@@ -511,7 +535,9 @@
                         personality: editingNpcData.personality, 
                         status: editingNpcData.status, 
                         location: editingNpcData.location,
-                        stats: editingNpcData.stats
+                        stats: editingNpcData.stats,
+                        appearance: editingNpcData.appearance,
+                        background: editingNpcData.background
                     };
 
                     if (oldName !== newName) {
@@ -542,8 +568,36 @@
                         return n;
                     });
                 }
-
+                showToastMsg("角色信息已保存");
                 setShowNpcEditor(false); 
+            };
+            
+            // New: AI Refine NPC
+            const handleAiRefineNpc = async () => {
+                if (!apiKey) {
+                    setError("请先设置API Key");
+                    return;
+                }
+                setNpcGenLoading(true);
+                try {
+                    const sys = `${systemPrompt}\n你是一个专业的小说家。请根据世界观：${worldData.title}，为角色 ${editingNpcData.name} (性格: ${editingNpcData.personality}, 身份: ${editingNpcData.status}) 完善设定。\n1. 外貌描写 (appearance): 细腻传神，体现性格，50字左右。\n2. 背景故事 (background): 结合世界观，简述其过往，100字左右。\n返回JSON: { appearance: "...", background: "..." }`;
+                    
+                    const res = await callAI([{role: "system", content: sys}, {role: "user", content: "请生成人物详情"}]);
+                    
+                    if (res) {
+                        setEditingNpcData(prev => ({
+                            ...prev,
+                            appearance: res.appearance || prev.appearance,
+                            background: res.background || prev.background
+                        }));
+                        showToastMsg("✨ 人设已生成");
+                    }
+                } catch (e) {
+                    console.error(e);
+                    showToastMsg("生成失败，请重试", "error");
+                } finally {
+                    setNpcGenLoading(false);
+                }
             };
             
             // NPC Stat Editing Helpers
@@ -675,6 +729,7 @@
                 if (!mapInputLocation.trim()) return;
                 setWorldData(p => ({...p, locations: [...p.locations, mapInputLocation]}));
                 setMapInputLocation('');
+                showToastMsg(`地点 "${mapInputLocation}" 已添加`);
             };
 
             const handleManualAddNpc = () => {
@@ -685,6 +740,7 @@
                     [mapInputNpc]: { favorability: 0, status: "陌生人", intent: "friendship", location: currentLocation || worldData.locations[0], personality: "神秘", mood: "平静" }
                 }));
                 setMapInputNpc('');
+                showToastMsg(`人物 "${mapInputNpc}" 已添加`);
             };
 
             const handleAiAddLocation = async () => {
@@ -697,6 +753,7 @@
                     if (res && res.name) {
                         setWorldData(p => ({...p, locations: [...p.locations, res.name]}));
                         setEventLog(prev => [{ date: formatDate(gameDate), content: `发现新区域：${res.name} - ${res.desc}` }, ...prev]);
+                        showToastMsg(`发现新地点：${res.name}`);
                     }
                 } catch(e) {}
                 setIsGeneratingMap(false);
@@ -717,6 +774,7 @@
                             [res.name]: { favorability: 0, status: "陌生人", intent: "friendship", location: loc, personality: res.personality, mood: "平静" }
                         }));
                         setEventLog(prev => [{ date: formatDate(gameDate), content: `邂逅新人物：${res.name} (${res.personality})` }, ...prev]);
+                        showToastMsg(`邂逅新人物：${res.name}`);
                     }
                 } catch(e) {}
                 setIsGeneratingMap(false);
@@ -756,6 +814,58 @@
                 setPhase('PLAYING');
             };
 
+            // Handle Item Use
+            const handleUseItem = (item) => {
+                setShowInventory(false);
+                setStoryLog(prev => [...prev, { type: 'user', text: `使用了【${item.name}】` }]);
+                generateNextTurn(`玩家使用了物品【${item.name}】(${item.desc})。请描述使用后的效果（如恢复属性、触发事件等）。如果物品被消耗，请在 lost_items 中返回。`);
+            };
+
+            // NEW: AI Get Random Item
+            const handleAiGetItem = async () => {
+                if (!apiKey) return showToastMsg("请先配置API Key", "error");
+                setItemGenLoading(true);
+                try {
+                    const sys = `${systemPrompt}\n请根据世界观(${worldData.title})和玩家当前状态，创造一个合理的物品。返回JSON: { name, desc, type, count: 1 }`;
+                    const res = await callAI([{role:"system", content:sys}, {role:"user", content:`玩家：${playerName}。请生成一个物品。`}]);
+                    if(res){
+                        const newItem = { id: Date.now(), name: res.name, desc: res.desc, count: res.count || 1, type: res.type || "普通" };
+                        setPlayerInventory(p => [newItem, ...p]);
+                        showToastMsg(`获得物品：${res.name}`);
+                    }
+                } catch(e) { console.error(e); showToastMsg("生成失败", "error"); }
+                setItemGenLoading(false);
+            };
+
+            // NEW: Item Editor Functions
+            const openItemEditor = (item = null) => {
+                setEditingItem(item || { id: null, name: '', desc: '', count: 1, type: '普通' });
+                setShowItemEditor(true);
+            };
+
+            const handleSaveItemEditor = () => {
+                if(!editingItem.name.trim()) return;
+                setPlayerInventory(prev => {
+                    const next = [...prev];
+                    if (editingItem.id) {
+                        const idx = next.findIndex(i => i.id === editingItem.id);
+                        if (idx !== -1) next[idx] = editingItem;
+                    } else {
+                        next.unshift({ ...editingItem, id: Date.now() });
+                    }
+                    return next;
+                });
+                setShowItemEditor(false);
+                showToastMsg("物品已保存");
+            };
+
+            const handleDeleteItem = (id) => {
+                if(confirm("确定要丢弃该物品吗？")) {
+                    setPlayerInventory(p => p.filter(i => i.id !== id));
+                    showToastMsg("物品已丢弃");
+                }
+            };
+
             // UPDATED Generate Turn with Strict Logic
             const generateNextTurn = async (context, isFirst = false, goal = null, isRetry = false, historyOverride = null) => {
                 setLoading(true);
@@ -768,6 +878,11 @@
                 const conditionsStr = Object.entries(victoryConditions).map(([k,v]) => `${k}: ${v}`).join(', ');
                 const statsStr = Object.entries(playerStats).map(([k,v]) => `${k}: ${v}`).join(', ');
                 
+                // Inventory String for AI Context
+                const inventoryStr = playerInventory.length > 0 
+                    ? playerInventory.map(i => `${i.name}x${i.count}`).join(', ') 
+                    : "空";
+
                 // Context for "Major Events"
                 const recentEvents = eventLog.slice(0, 5).map(e => e.content).join('; ');
 
@@ -788,17 +903,18 @@
 
 【主角档案】
 姓名：${playerName} (${playerAge} ${playerGender})
-性格：${playerPersonality}
-外貌：${playerAppearance}
-天赋：${playerTalent}
-身世：${playerBackground}
-**当前属性**：${statsStr}
-**终极目标**："${g}"
-**胜利达成条件**：${conditionsStr || "暂无具体数值要求，自行探索"}
+当前属性：${statsStr}
+**当前背包**：${inventoryStr}
+终极目标："${g}"
+胜利条件：${conditionsStr || "暂无具体数值要求，自行探索"}
 
 【生成要求】
 请根据上述信息，尤其是【当前属性】和【核心原则】，生成下一回合剧情。
-JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变化}, "newNpcs": ["新NPC名(简述)"], "deadNpcs": ["死亡NPC名"], "choices": [{"text":"选项文本","action":"简短指令"}], "log": "重大事件日志(可选)" }`;
+**物品系统指令**：
+1. 如果剧情中玩家获得了物品，请在 JSON 的 \`gained_items\` 字段返回数组：\`[{name: "物品名", desc: "描述", count: 数量, type: "类型"}]\`。
+2. 如果剧情中玩家消耗、丢失或使用了物品（且该物品应被移除），请在 \`lost_items\` 字段返回物品名称数组：\`["物品名"]\`。
+
+JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变化}, "newNpcs": ["新NPC名"], "deadNpcs": ["死亡NPC名"], "gained_items": [], "lost_items": [], "choices": [{"text":"选项","action":"指令"}], "log": "事件日志" }`;
                 
                 // Use historyOverride if provided (for regeneration), otherwise use current storyLog
                 const currentHistory = historyOverride || storyLog;
@@ -808,17 +924,58 @@ JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变�
                 let data = !apiKey ? MOCK_SCENARIO_RESPONSE : await callAI([{role:"system", content:sys}, {role:"user", content:usr}]);
                 
                 if (data) {
+                    // Update Stats
                     if (data.changes) { 
                         const ns = {...playerStats}; 
                         Object.keys(data.changes).forEach(k => { 
                             if(ns[k]!=undefined) {
-                                // Apply logic to limit growth, but ensure we respect the cap of 100
                                 let delta = data.changes[k];
                                 ns[k] = Math.min(100, Math.max(0, ns[k] + delta)); 
                             }
                         }); 
                         setPlayerStats(ns); 
                     }
+                    
+                    // Update Inventory - Gain Items
+                    if (data.gained_items && Array.isArray(data.gained_items)) {
+                        let newItemsList = [];
+                        setPlayerInventory(prev => {
+                            const next = [...prev];
+                            data.gained_items.forEach(newItem => {
+                                const existingIndex = next.findIndex(i => i.name === newItem.name);
+                                if (existingIndex >= 0) {
+                                    next[existingIndex].count += (newItem.count || 1);
+                                } else {
+                                    next.push({
+                                        id: Date.now() + Math.random(),
+                                        name: newItem.name,
+                                        desc: newItem.desc || "暂无描述",
+                                        count: newItem.count || 1,
+                                        type: newItem.type || "普通"
+                                    });
+                                }
+                                newItemsList.push(newItem.name);
+                            });
+                            return next;
+                        });
+                        if (newItemsList.length > 0) showToastMsg(`获得物品：${newItemsList.join(', ')}`);
+                    }
+
+                    // Update Inventory - Lost Items
+                    if (data.lost_items && Array.isArray(data.lost_items)) {
+                        setPlayerInventory(prev => {
+                            let next = [...prev];
+                            data.lost_items.forEach(lostName => {
+                                const idx = next.findIndex(i => i.name === lostName);
+                                if (idx >= 0) {
+                                    next[idx].count -= 1;
+                                    if (next[idx].count <= 0) next.splice(idx, 1);
+                                }
+                            });
+                            return next;
+                        });
+                    }
+
                     if (data.newNpcs) { 
                         const newSet = [...new Set([...worldData.npcs, ...data.newNpcs])]; 
                         setWorldData(p => ({...p, npcs: newSet}));
@@ -842,13 +999,10 @@ JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变�
                         });
                     }
                     if (data.log) {
-                        // Append date to the log from AI or use current game date
                         const logContent = `${dateStr}：${data.log}`;
                         setEventLog(prev => [{ date: dateStr, content: data.log }, ...prev]);
                     }
-                    // For retry, we replaced the log content already in handleRegenerate logic if needed,
-                    // but usually we just append. Wait, if it is retry, we want to *replace* the last narrative?
-                    // Actually handleRegenerate removes the old narrative. So here we just append.
+                    
                     if(!isFirst) setStoryLog(p => [...p, {type:'narrative', text:data.text}]);
                     setCurrentChoices(data.choices||[]);
                 }
@@ -951,10 +1105,18 @@ JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变�
             const enterLocation = (loc) => { setCurrentLocation(loc); setShowMap(false); };
             const openNpcChat = (npc) => { setActiveNpc(npc); setShowNpcList(false); setShowMap(false); };
             const closeNpcChat = () => { setActiveNpc(null); };
-            const handleSaveGame = () => { const save = { id:Date.now(), date: new Date().toLocaleString(), title: worldData.title, playerName, state: { worldData, playerStats, playerName, storyLog, currentChoices, phase, npcChats, npcRelationships, selectedGoal, playerAvatar, npcAvatars, themeConfig, currentLocation, playerAge, playerGender, playerPersonality, playerAppearance, playerTalent, playerBackground, gameDate, eventLog, victoryConditions } }; localStorage.setItem('ai_sim_saves', JSON.stringify([save, ...JSON.parse(localStorage.getItem('ai_sim_saves')||'[]')].slice(0,10))); setSaveMessage("存档成功！"); setTimeout(()=>setSaveMessage(''), 2000); };
+            
+            // --- UPDATED: Save Game with Toast ---
+            const handleSaveGame = () => { 
+                const save = { id:Date.now(), date: new Date().toLocaleString(), title: worldData.title, playerName, state: { worldData, playerStats, playerName, storyLog, currentChoices, phase, npcChats, npcRelationships, selectedGoal, playerAvatar, npcAvatars, themeConfig, currentLocation, playerAge, playerGender, playerPersonality, playerAppearance, playerTalent, playerBackground, gameDate, eventLog, victoryConditions, playerInventory } }; 
+                localStorage.setItem('ai_sim_saves', JSON.stringify([save, ...JSON.parse(localStorage.getItem('ai_sim_saves')||'[]')].slice(0,10))); 
+                showToastMsg("✅ 存档成功！");
+            };
+            
             const handleLoadGame = (s) => { const st = s.state; setWorldData(st.worldData); setPlayerStats(st.playerStats); setPlayerName(st.playerName); setStoryLog(st.storyLog); setCurrentChoices(st.currentChoices); setNpcChats(st.npcChats||{}); setNpcRelationships(st.npcRelationships||{}); setSelectedGoal(st.selectedGoal||''); setPlayerAvatar(st.playerAvatar); setNpcAvatars(st.npcAvatars||{}); if(st.themeConfig) setThemeConfig(st.themeConfig); setCurrentLocation(st.currentLocation || (st.worldData.locations ? st.worldData.locations[0] : null)); setPlayerAge(st.playerAge||''); setPlayerGender(st.playerGender||''); setPlayerPersonality(st.playerPersonality||''); setPlayerAppearance(st.playerAppearance||''); setPlayerTalent(st.playerTalent||''); setPlayerBackground(st.playerBackground||''); 
-                setGameDate(st.gameDate || { year: 1, month: 1, day: 1, hour: 8 }); setEventLog(st.eventLog || []); setVictoryConditions(st.victoryConditions || {});
+                setGameDate(st.gameDate || { year: 1, month: 1, day: 1, hour: 8 }); setEventLog(st.eventLog || []); setVictoryConditions(st.victoryConditions || {}); setPlayerInventory(st.playerInventory || []);
                 setPhase('PLAYING'); setShowLoadMenu(false); 
+                showToastMsg("读取存档成功");
             };
             const handleDeleteSave = (id, e) => { e.stopPropagation(); localStorage.setItem('ai_sim_saves', JSON.stringify(JSON.parse(localStorage.getItem('ai_sim_saves')||'[]').filter(s=>s.id!==id))); setShowLoadMenu(false); setTimeout(()=>setShowLoadMenu(true),0); };
             
@@ -962,8 +1124,7 @@ JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变�
             const handleExportSaves = () => {
                 const saves = localStorage.getItem('ai_sim_saves');
                 if (!saves || saves === '[]') {
-                    setSaveMessage("暂无存档");
-                    setTimeout(() => setSaveMessage(''), 2000);
+                    showToastMsg("暂无存档可导出", "error");
                     return;
                 }
                 setExportContent(saves);
@@ -980,14 +1141,30 @@ JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变�
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
-                setSaveMessage("已尝试下载");
-                setTimeout(() => setSaveMessage(''), 2000);
+                showToastMsg("已尝试下载", "success");
             };
 
             // Removed copyExportToClipboard as requested
             // --- FIX END ---
 
-            const handleImportSaves = (e) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (event) => { try { const imported = JSON.parse(event.target.result); if (!Array.isArray(imported)) throw new Error("格式错误"); localStorage.setItem('ai_sim_saves', JSON.stringify(imported)); setSaveMessage("导入成功！"); setTimeout(() => setSaveMessage(''), 2000); setShowLoadMenu(false); setTimeout(() => setShowLoadMenu(true), 100); } catch (err) { alert("导入失败：文件格式不正确"); } }; reader.readAsText(file); };
+            const handleImportSaves = (e) => { 
+                const file = e.target.files[0]; 
+                if (!file) return; 
+                const reader = new FileReader(); 
+                reader.onload = (event) => { 
+                    try { 
+                        const imported = JSON.parse(event.target.result); 
+                        if (!Array.isArray(imported)) throw new Error("格式错误"); 
+                        localStorage.setItem('ai_sim_saves', JSON.stringify(imported)); 
+                        showToastMsg("✅ 导入成功！");
+                        setShowLoadMenu(false); 
+                        setTimeout(() => setShowLoadMenu(true), 100); 
+                    } catch (err) { 
+                        alert("导入失败：文件格式不正确"); 
+                    } 
+                }; 
+                reader.readAsText(file); 
+            };
 
             // Styles & Modal Helper (Same)
             const appStyle = { backgroundImage: themeConfig.bgImage ? `url(${themeConfig.bgImage})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center', fontFamily: themeConfig.font === 'serif' ? '"Noto Serif SC", serif' : '"Noto Sans SC", sans-serif', '--accent': themeConfig.primary, '--accent-dim': `${themeConfig.primary}40`, '--accent-glow': `${themeConfig.primary}80`, '--panel-bg': `rgba(20, 20, 25, ${themeConfig.bgOpacity})` };
@@ -1210,6 +1387,11 @@ JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变�
                                 <button onClick={()=>setShowEventLog(true)} className="glass-btn p-1.5 rounded-lg text-amber-400 text-[10px] flex items-center gap-1"><SvgIcon name="Scroll" size={14}/> 编年史</button>
                                 <button onClick={()=>openMap()} className="glass-btn p-1.5 rounded-lg text-gray-300"><SvgIcon name="Map" size={16}/></button> 
                                 <button onClick={()=>setShowNpcList(true)} className="glass-btn p-1.5 rounded-lg text-gray-300"><SvgIcon name="Message" size={16}/></button>
+                                {/* NEW: Inventory Button */}
+                                <button onClick={()=>setShowInventory(true)} className="glass-btn p-1.5 rounded-lg text-blue-300 relative">
+                                    <SvgIcon name="Backpack" size={16}/>
+                                    {playerInventory.length > 0 && <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>}
+                                </button>
                                 <button onClick={handleSaveGame} className="glass-btn p-1.5 rounded-lg text-emerald-400"><SvgIcon name="Save" size={16}/></button> 
                             </div> 
                         </div>
@@ -1267,6 +1449,14 @@ JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变�
                     {phase==='CHAR_GEN' && renderCharGen()}
                     {phase==='PLAYING' && renderPlay()}
                     
+                    {/* NEW: Global Toast Notification (Fixed at top) */}
+                    <div className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-[200] transition-all duration-300 pointer-events-none ${toast.show ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
+                        <div className="glass-panel px-6 py-3 rounded-full flex items-center gap-2 shadow-2xl border border-white/20 bg-black/60 backdrop-blur-xl">
+                            <SvgIcon name={toast.type === 'error' ? 'Warning' : 'Check'} size={20} className={toast.type === 'error' ? 'text-red-400' : 'text-emerald-400'} />
+                            <span className="font-bold text-white text-sm tracking-wide">{toast.message}</span>
+                        </div>
+                    </div>
+
                     {/* Settings Modal */}
                     {showSettings && <Modal title={<><SvgIcon name="Settings" /> 设置</>} onClose={()=>setShowSettings(false)}> <div className="space-y-4"> <div className="space-y-1"><label className="text-xs text-gray-400 uppercase font-bold">API 地址</label><input type="text" value={baseUrl} onChange={(e)=>setBaseUrl(e.target.value)} className="glass-input w-full p-3 rounded-lg text-white"/></div> <div className="space-y-1"><label className="text-xs text-gray-400 uppercase font-bold">API Key</label><input type="password" value={apiKey} onChange={(e)=>setApiKey(e.target.value)} className="glass-input w-full p-3 rounded-lg text-white"/></div> <div className="space-y-1"><label className="text-xs text-gray-400 uppercase font-bold">模型名称</label><div className="flex gap-2"><input type="text" value={model} onChange={(e)=>setModel(e.target.value)} className="glass-input flex-1 p-3 rounded-lg text-white"/><button onClick={fetchModels} disabled={fetchingModels} className="glass-btn p-3 rounded-lg text-white">{fetchingModels?<span className="spin block w-4 h-4 border-2 border-white/30 border-t-white rounded-full"></span>:<SvgIcon name="Refresh" size={18}/>}</button></div>{modelList.length>0&&<select onChange={(e)=>e.target.value&&setModel(e.target.value)} className="glass-input w-full mt-2 p-3 rounded-lg text-white bg-gray-900"><option>-- 选择模型 --</option>{modelList.map(m=><option key={m.id} value={m.id}>{m.id}</option>)}</select>}</div> <div className="space-y-1"><label className="text-xs text-gray-400 uppercase font-bold">AI 设定 (System Prompt)</label><textarea value={systemPrompt} onChange={(e)=>setSystemPrompt(e.target.value)} className="glass-input w-full p-3 rounded-lg text-white text-xs h-32 resize-none" placeholder="自定义 AI 的行为逻辑..."></textarea></div> <div className="pt-2 flex gap-2"><button onClick={saveSettings} className="flex-1 py-3 rounded-xl font-bold text-white" style={{backgroundColor:themeConfig.primary}}>保存</button></div> </div> </Modal>}
                     
@@ -1276,28 +1466,58 @@ JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变�
                     {/* Avatar Editor Modal */}
                     {showAvatarEditor && <Modal title={<><SvgIcon name="Camera"/> {editingTarget==='bg'?'背景图片':`设置头像`}</>} onClose={()=>setShowAvatarEditor(false)}> <div className="space-y-6"> <label className="block glass-btn py-8 rounded-xl cursor-pointer border-dashed border-2 border-white/20 hover:border-white/50 text-center active:scale-95 transition"><div className="flex flex-col items-center gap-2 text-gray-300"><SvgIcon name="FolderOpen" size={32} className="opacity-50"/><span>点击上传本地图片</span></div><input type="file" accept="image/*" onChange={(e)=>handleFileUpload(e)} className="hidden"/></label> <div className="flex items-center gap-4 text-xs text-gray-500"><div className="h-px bg-white/10 flex-1"></div>OR<div className="h-px bg-white/10 flex-1"></div></div> <div className="flex gap-2"><input type="text" id="urlInput" placeholder="输入图片 URL..." className="glass-input flex-1 p-3 rounded-lg text-white outline-none"/><button onClick={()=>handleUrlSubmit(document.getElementById('urlInput').value)} className="glass-btn px-4 rounded-lg text-white"><SvgIcon name="Send"/></button></div> {editingTarget==='bg' && <button onClick={()=>{setThemeConfig(p=>({...p,bgImage:''}));setShowAvatarEditor(false)}} className="w-full text-xs text-red-400 hover:text-red-300 py-3 mt-2">移除当前背景</button>} </div> </Modal>}
                     
-                    {/* NPC Editor Modal */}
+                    {/* NPC Editor Modal - UPDATED WITH AI & DETAILS */}
                     {showNpcEditor && <Modal title="编辑 NPC" onClose={()=>setShowNpcEditor(false)}> 
                         <div className="space-y-4"> 
                             <div className="flex justify-center mb-4"> 
                                 <Avatar name={editingTarget} url={npcAvatars[editingTarget]} size="w-24 h-24" onClick={()=>{setShowNpcEditor(false);openAvatarEditor(editingTarget);}} canEdit={true} /> 
                             </div> 
+                            
+                            <button onClick={handleAiRefineNpc} disabled={npcGenLoading} className="w-full py-2 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center justify-center gap-2 text-xs font-bold hover:bg-indigo-500/30 transition">
+                                {npcGenLoading ? <span className="spin block w-3 h-3 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full"></span> : <><SvgIcon name="Sparkles" size={14}/> AI 一键完善人设</>}
+                            </button>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <label className="text-xs text-gray-400 font-bold">姓名</label>
+                                    <input value={editingNpcData.name} onChange={(e)=>setEditingNpcData(p=>({...p,name:e.target.value}))} className="glass-input w-full p-3 rounded-lg text-white"/>
+                                </div> 
+                                <div className="space-y-1">
+                                    <label className="text-xs text-gray-400 font-bold">性格</label>
+                                    <input value={editingNpcData.personality} onChange={(e)=>setEditingNpcData(p=>({...p,personality:e.target.value}))} className="glass-input w-full p-3 rounded-lg text-white"/>
+                                </div> 
+                            </div>
+                            
                             <div className="space-y-1">
-                                <label className="text-xs text-gray-400 font-bold">姓名</label>
-                                <input value={editingNpcData.name} onChange={(e)=>setEditingNpcData(p=>({...p,name:e.target.value}))} className="glass-input w-full p-3 rounded-lg text-white"/>
-                            </div> 
+                                <label className="text-xs text-gray-400 font-bold">外貌描写</label>
+                                <textarea 
+                                    value={editingNpcData.appearance} 
+                                    onChange={(e)=>setEditingNpcData(p=>({...p, appearance:e.target.value}))} 
+                                    className="glass-input w-full p-3 rounded-lg text-white text-sm h-20 resize-none"
+                                    placeholder="如：面如冠玉，目若朗星..."
+                                />
+                            </div>
+
                             <div className="space-y-1">
-                                <label className="text-xs text-gray-400 font-bold">性格</label>
-                                <input value={editingNpcData.personality} onChange={(e)=>setEditingNpcData(p=>({...p,personality:e.target.value}))} className="glass-input w-full p-3 rounded-lg text-white"/>
-                            </div> 
-                            <div className="space-y-1">
-                                <label className="text-xs text-gray-400 font-bold">当前状态</label>
-                                <input value={editingNpcData.status} onChange={(e)=>setEditingNpcData(p=>({...p,status:e.target.value}))} className="glass-input w-full p-3 rounded-lg text-white"/>
-                            </div> 
-                            <div className="space-y-1">
-                                <label className="text-xs text-gray-400 font-bold">所在位置</label>
-                                <select value={editingNpcData.location} onChange={(e)=>setEditingNpcData(p=>({...p,location:e.target.value}))} className="glass-input w-full p-3 rounded-lg text-white bg-gray-900">{(worldData.locations||[]).map(l=><option key={l} value={l} className="bg-gray-900">{l}</option>)}</select>
-                            </div> 
+                                <label className="text-xs text-gray-400 font-bold">背景故事</label>
+                                <textarea 
+                                    value={editingNpcData.background} 
+                                    onChange={(e)=>setEditingNpcData(p=>({...p, background:e.target.value}))} 
+                                    className="glass-input w-full p-3 rounded-lg text-white text-sm h-24 resize-none leading-relaxed"
+                                    placeholder="如：本是前朝太子..."
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <label className="text-xs text-gray-400 font-bold">当前状态</label>
+                                    <input value={editingNpcData.status} onChange={(e)=>setEditingNpcData(p=>({...p,status:e.target.value}))} className="glass-input w-full p-3 rounded-lg text-white"/>
+                                </div> 
+                                <div className="space-y-1">
+                                    <label className="text-xs text-gray-400 font-bold">所在位置</label>
+                                    <select value={editingNpcData.location} onChange={(e)=>setEditingNpcData(p=>({...p,location:e.target.value}))} className="glass-input w-full p-3 rounded-lg text-white bg-gray-900">{(worldData.locations||[]).map(l=><option key={l} value={l} className="bg-gray-900">{l}</option>)}</select>
+                                </div> 
+                            </div>
 
                             {/* NPC Stats Section */}
                             <div className="pt-2 border-t border-white/10 mt-2">
@@ -1443,7 +1663,105 @@ JSON返回格式：{ "text": "剧情文本", "changes": {"属性名": 数值变�
                                 <SvgIcon name="Download" size={20}/> 立即下载
                             </button>
                             
-                            {saveMessage && <div className="text-center text-emerald-400 text-xs mt-2 copy-feedback">{saveMessage}</div>}
+                        </div>
+                    </Modal>}
+                    
+                    {/* NEW: Inventory Modal (Updated) */}
+                    {showInventory && <Modal title={<><SvgIcon name="Backpack"/> 背包</>} onClose={()=>setShowInventory(false)}>
+                        <div className="flex gap-2 mb-4">
+                            <button 
+                                onClick={handleAiGetItem} 
+                                disabled={itemGenLoading}
+                                className="flex-1 py-2 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-bold flex items-center justify-center gap-1 hover:bg-amber-500/30 transition"
+                            >
+                                {itemGenLoading ? <span className="spin w-3 h-3 border-2 border-amber-300/30 border-t-amber-300 rounded-full"></span> : <><SvgIcon name="Sparkles" size={14}/> AI 赐物</>}
+                            </button>
+                            <button 
+                                onClick={() => openItemEditor()} 
+                                className="flex-1 py-2 bg-white/5 text-white border border-white/10 rounded-lg text-xs font-bold flex items-center justify-center gap-1 hover:bg-white/10 transition"
+                            >
+                                <SvgIcon name="Plus" size={14}/> 自定义
+                            </button>
+                        </div>
+
+                        {playerInventory.length === 0 ? (
+                            <div className="text-center py-8 text-gray-500">
+                                <p>背包空空如也...</p>
+                                <p className="text-xs mt-2">在冒险中寻找机遇吧！</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 gap-3">
+                                {playerInventory.map((item, idx) => (
+                                    <div key={item.id || idx} className="glass-panel p-3 rounded-xl flex items-center gap-3 border border-white/5 group">
+                                        <div className="w-12 h-12 bg-white/5 rounded-lg flex items-center justify-center text-emerald-400 shrink-0 border border-white/10">
+                                            <SvgIcon name="Sparkles" size={20}/>
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex justify-between items-center mb-1">
+                                                <h4 className="font-bold text-white text-sm truncate">{item.name}</h4>
+                                                <span className="text-xs bg-white/10 px-2 py-0.5 rounded-full text-gray-300">x{item.count}</span>
+                                            </div>
+                                            <p className="text-xs text-gray-400 truncate">{item.desc}</p>
+                                        </div>
+                                        <div className="flex gap-1 shrink-0">
+                                            <button onClick={() => handleUseItem(item)} className="p-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 rounded-lg transition" title="使用"><SvgIcon name="Check" size={16}/></button>
+                                            <button onClick={() => openItemEditor(item)} className="p-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 rounded-lg transition" title="编辑"><SvgIcon name="Edit" size={16}/></button>
+                                            <button onClick={() => handleDeleteItem(item.id)} className="p-2 bg-red-600/20 hover:bg-red-600/40 text-red-300 rounded-lg transition" title="丢弃"><SvgIcon name="Trash" size={16}/></button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </Modal>}
+
+                    {/* NEW: Item Editor Modal */}
+                    {showItemEditor && <Modal title={editingItem?.id ? "编辑物品" : "创造物品"} onClose={()=>setShowItemEditor(false)}>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs text-gray-400 font-bold mb-1 block">物品名称</label>
+                                <input 
+                                    value={editingItem.name} 
+                                    onChange={(e) => setEditingItem(p => ({...p, name: e.target.value}))} 
+                                    className="glass-input w-full p-3 rounded-lg text-white" 
+                                    placeholder="例如：屠龙宝刀"
+                                />
+                            </div>
+                            <div className="flex gap-3">
+                                <div className="flex-1">
+                                    <label className="text-xs text-gray-400 font-bold mb-1 block">数量</label>
+                                    <input 
+                                        type="number"
+                                        value={editingItem.count} 
+                                        onChange={(e) => setEditingItem(p => ({...p, count: Number(e.target.value)}))} 
+                                        className="glass-input w-full p-3 rounded-lg text-white" 
+                                    />
+                                </div>
+                                <div className="flex-1">
+                                    <label className="text-xs text-gray-400 font-bold mb-1 block">类型</label>
+                                    <input 
+                                        value={editingItem.type} 
+                                        onChange={(e) => setEditingItem(p => ({...p, type: e.target.value}))} 
+                                        className="glass-input w-full p-3 rounded-lg text-white" 
+                                        placeholder="例如：武器"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400 font-bold mb-1 block">物品描述</label>
+                                <textarea 
+                                    value={editingItem.desc} 
+                                    onChange={(e) => setEditingItem(p => ({...p, desc: e.target.value}))} 
+                                    className="glass-input w-full p-3 rounded-lg text-white h-24 resize-none" 
+                                    placeholder="这件物品的来历和作用..."
+                                />
+                            </div>
+                            <button 
+                                onClick={handleSaveItemEditor} 
+                                className="w-full py-3 rounded-xl font-bold text-white mt-2" 
+                                style={{backgroundColor: themeConfig.primary}}
+                            >
+                                保存物品
+                            </button>
                         </div>
                     </Modal>}
                     
